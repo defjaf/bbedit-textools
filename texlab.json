@@ -1,0 +1,28 @@
+{
+	"initializationOptions": {},
+	"workspaceConfigurations": {
+		"*": {
+			"texlab": {
+				"build": {
+					"executable": "/Library/TeX/texbin/latexmk",
+					"args": ["-interaction=nonstopmode", "-synctex=1", "-file-line-error", "%f"],
+					"onSave": false,
+					"forwardSearchAfter": true
+				},
+				"forwardSearch": {
+					"executable": "/Applications/Skim.app/Contents/SharedSupport/displayline",
+					"args": ["-r", "-g", "%l", "%p", "%f"]
+				},
+				"chktex": {
+					"onOpenAndSave": true,
+					"onEdit": false
+				},
+				"diagnostics": {
+					"ignoredPatterns": []
+				},
+				"latexFormatter": "latexindent",
+				"bibtexFormatter": "texlab"
+			}
+		}
+	}
+}

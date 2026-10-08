@@ -1,0 +1,24 @@
+#!/bin/bash
+# Install TeX Tools into BBEdit: copies the package and the texlab configuration
+# into BBEdit's Application Support folder (iCloud-synced or local, whichever exists).
+set -euo pipefail
+here="$(cd "$(dirname "$0")" && pwd)"
+
+icloud="$HOME/Library/Mobile Documents/iCloud~com~barebones~bbedit/Documents/Application Support"
+local_dir="$HOME/Library/Application Support/BBEdit"
+if [ -d "$icloud" ]; then support="$icloud"; else support="$local_dir"; fi
+
+pkg="$support/Packages/TeX Tools.bbpackage"
+mkdir -p "$support/Packages" "$support/Language Servers/Configuration"
+rsync -a --delete --exclude __pycache__ --exclude .DS_Store \
+    "$here/TeX Tools.bbpackage/" "$pkg/"
+echo "Installed package  → $pkg"
+
+conf="$support/Language Servers/Configuration/texlab.json"
+if [ -f "$conf" ] && ! cmp -s "$here/texlab.json" "$conf"; then
+    cp "$conf" "$conf.bak"
+    echo "Existing texlab.json differed; saved it as texlab.json.bak"
+fi
+cp "$here/texlab.json" "$conf"
+echo "Installed texlab   → $conf"
+echo "Script changes take effect immediately; relaunch BBEdit if new menu items don't appear."

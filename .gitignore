@@ -1,0 +1,4 @@
+__pycache__/
+.DS_Store
+# Local copies of superseded scripts (not ours to publish)
+archive/
