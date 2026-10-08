@@ -75,8 +75,16 @@ def notify(message, title="TeX Tools", sound=None):
         pass
 
 
+TEX_DOC_SUFFIXES = (".tex", ".ltx", ".latex", ".bib", ".sty", ".cls", ".dtx", ".bbx", ".cbx")
+
+
 def front_document(save=True):
-    """Save modified on-disk documents; return (path, line) of the front one."""
+    """Save modified on-disk documents; return (path, line) of the frontmost TeX document.
+
+    Windows without a TeX file in front (results browsers, other documents)
+    are skipped, so commands still work when e.g. an outline window is on top.
+    If no TeX document is open, show a notification and exit quietly.
+    """
     save_part = """
         repeat with d in (every text document whose modified is true)
             try
@@ -84,16 +92,33 @@ def front_document(save=True):
             end try
         end repeat
     """ if save else ""
+    suffixes = " or ".join(f'p ends with "{s}"' for s in TEX_DOC_SUFFIXES)
     script = f"""
     tell application "BBEdit"
         {save_part}
-        set d to active document of text window 1
-        set p to POSIX path of ((file of d) as alias)
-        set l to startLine of selection of text window 1
-        return p & linefeed & (l as text)
+        repeat with w in (every text window)
+            try
+                set p to POSIX path of ((file of (active document of w)) as alias)
+                if {suffixes} then
+                    set l to 1
+                    try
+                        set l to startLine of selection of w
+                    end try
+                    return p & linefeed & (l as text)
+                end if
+            end try
+        end repeat
+        return ""
     end tell
     """
-    out = osascript(script)
+    try:
+        out = osascript(script)
+    except RuntimeError as e:
+        notify(f"Couldn't talk to BBEdit: {e}")
+        sys.exit(0)
+    if not out:
+        notify("No saved TeX document is open in BBEdit.")
+        sys.exit(0)
     path, line = out.split("\n")
     return Path(path), int(line)
 
@@ -591,7 +616,22 @@ OUTLINE_RE = re.compile(
     r"|\\(?:sub)?import\*?\s*\{(?P<impdir>[^}]*)\}\s*\{(?P<impfile>[^}]*)\}"
     r"|\\begin\s*\{(?P<begin>[^}]*)\}"
     r"|\\end\s*\{(?P<end>[^}]*)\}"
-    r"|\\caption\s*(?:\[[^\]]*\])?\s*\{(?P<caption>)")
+    r"|\\caption\s*(?:\[[^\]]*\])?\s*\{(?P<caption>)"
+    r"|\\(?:re|provide)?newcommand\*?\s*\{?\s*\\(?P<defname>[a-zA-Z@]+)\s*\}?\s*(?:\[(?P<defn>\d)\])?\s*(?:\[[^\]]*\])?\s*\{"
+    r"|\\[gex]?def\s*\\(?P<dname>[a-zA-Z@]+)(?P<dparams>(?:#\d)*)\s*\{"
+    r"|\\(?:re)?newenvironment\*?\s*\{[^}]*\}\s*(?:\[\d\])?\s*(?:\[[^\]]*\])?\s*\{(?P<envdef>)"
+    r"|\\(?P<cmd>[a-zA-Z@]+)")
+
+# Label-prefix conventions, used when neither the .aux nor the environment says what a label is.
+PREFIX_KINDS = {"fig": "figure", "figure": "figure", "tab": "table", "table": "table",
+                "eq": "equation", "eqn": "equation", "equation": "equation",
+                "sec": "section", "section": "section", "ssec": "subsection",
+                "subsec": "subsection", "chap": "chapter", "chapter": "chapter",
+                "ch": "chapter", "app": "appendix", "appendix": "appendix",
+                "thm": "theorem", "lem": "lemma", "prop": "proposition",
+                "cor": "corollary", "def": "definition", "lst": "listing"}
+FLOAT_ENVS = {"figure", "table", "wrapfigure", "sidewaysfigure", "sidewaystable", "subfigure"}
+MATH_ENVS = {"equation", "align", "gather", "multline", "eqnarray", "flalign", "alignat"}
 
 
 def _braced(text, pos):
@@ -607,6 +647,54 @@ def _braced(text, pos):
     return text[pos:i - 1]
 
 
+def _args(text, pos, n):
+    """Read up to n macro arguments starting at pos; return (args, end_pos).
+
+    Optional [..] arguments are skipped; an unbraced argument is a single
+    token (one character or a control sequence).
+    """
+    args = []
+    while len(args) < n:
+        while pos < len(text) and text[pos] in " \t\n":
+            pos += 1
+        if pos >= len(text):
+            break
+        if text[pos] == "[":
+            j = text.find("]", pos)
+            pos = j + 1 if j > 0 else len(text)
+            continue
+        if text[pos] == "{":
+            body = _braced(text, pos + 1)
+            args.append(body)
+            pos += len(body) + 2
+        elif text[pos] == "\\":
+            m = re.match(r"\\(?:[a-zA-Z@]+|.)", text[pos:])
+            args.append(m.group())
+            pos += len(m.group())
+        else:
+            args.append(text[pos])
+            pos += 1
+    return args, pos
+
+
+def _macro_info(body, nargs):
+    """Describe a user macro whose body sections or labels via its arguments."""
+    sec = re.search(r"\\(part|chapter|section|subsection|subsubsection|paragraph)(\*?)"
+                    r"\s*(?:\[[^\]]*\])?\s*\{\s*#(\d)\s*\}", body)
+    lab = re.search(r"\\label\s*\{([^}#]*)#(\d)([^}#]*)\}", body)
+    if not (sec or lab) or nargs == 0:
+        return None
+    used = {int(sec.group(3)) if sec else 0, int(lab.group(2)) if lab else 0}
+    counter = re.search(r"\\refstepcounter\s*\{(\w+)\}", body)
+    caption = next((i for i in range(1, nargs + 1) if i not in used
+                    and re.search(r"#%d(?!\d)" % i, body)), None)
+    return {"nargs": nargs,
+            "sec": (sec.group(1), sec.group(2), int(sec.group(3))) if sec else None,
+            "label": (lab.group(1), int(lab.group(2)), lab.group(3)) if lab else None,
+            "kind": counter.group(1) if counter else None,
+            "caption": caption}
+
+
 def _strip_comments(text):
     return re.sub(r"(?<!\\)%.*", "", text)
 
@@ -614,7 +702,7 @@ def _strip_comments(text):
 def _plain(tex, labels=None):
     """Rough TeX → plain text for display; inline maths is kept verbatim.
 
-    With `labels` (from the .aux), \ref/\eqref become their numbers.
+    With `labels` (from the .aux), \\ref/\\eqref become their numbers.
     """
     if labels:
         tex = re.sub(r"\\(eq)?ref\s*\{([^}]*)\}",
@@ -628,6 +716,7 @@ def _plain(tex, labels=None):
 def _plain_text(tex):
     s = re.sub(r"\\(?:emph|textbf|textit|textsc|texttt|mathrm|mathbf|text)\s*\{([^{}]*)\}", r"\1", tex)
     s = re.sub(r"\\(?:label|cite\w*|ref|eqref|footnote)\s*\{[^{}]*\}", "", s)
+    s = re.sub(r"\\[ ,;:!/]|\\\\", " ", s)
     s = re.sub(r"\\[a-zA-Z@]+\*?", "", s)
     return re.sub(r"[{}~]", lambda m: " " if m.group() == "~" else "", s)
 
@@ -664,13 +753,21 @@ def _read_aux(aux, labels, toc, seen):
 
 
 def build_outline(root):
+    """Sections and labels across the project, in document order.
+
+    Follows \\input/\\include/\\import from the root file, understands user
+    macros that wrap \\section or \\label (e.g. \\newcommand{\\npsection}[1]
+    {\\newpage\\section{#1}}), and takes numbers and pages from the .aux.
+    Returns a list of (path, line, level, text).
+    """
     root = Path(root)
     labels, toc = {}, []
     _read_aux(root.with_suffix(".aux"), labels, toc, set())
     toc_pos = 0
-    entries = []          # (path, line, level, text)
+    entries = []
     visited = set()
-    state = {"level": 0}
+    macros = {}
+    state = {"level": 0, "last_section": None}
 
     def section_number(kind, title):
         nonlocal toc_pos
@@ -681,6 +778,48 @@ def build_outline(root):
                 toc_pos = k + 1
                 return num
         return None
+
+    def add_section(path, line, kind, star, title):
+        lvl = SECTION_LEVELS[kind]
+        state["level"] = lvl
+        num = None if star else section_number(kind, title)
+        head = f"{num}  " if num else ""
+        entries.append((path, line, lvl, f"{head}{_plain(title, labels)}"))
+        state["last_section"] = (len(entries) - 1, num, line)
+
+    def add_label(path, line, key, envs, hint=None, caption=None):
+        info = labels.get(key, [])
+        num = info[0] if info else None
+        page = info[1] if len(info) > 1 else None
+        anchor = info[3] if len(info) > 3 else ""
+        open_envs = [e.rstrip("*") for e in envs if e.rstrip("*") != "document"]
+        prefix = key.split(":")[0].lower() if ":" in key else ""
+        meaningful = [e for e in open_envs if e in LABEL_KINDS or e in FLOAT_ENVS | MATH_ENVS]
+        kind = (anchor.split(".")[0] if anchor else None) or hint \
+            or (meaningful[-1] if meaningful else None) or PREFIX_KINDS.get(prefix, "")
+        kind_name = "Eq." if kind in MATH_ENVS else LABEL_KINDS.get(kind, kind.capitalize() if kind else "")
+
+        last = state["last_section"]
+        in_float_or_math = any(e in FLOAT_ENVS | MATH_ENVS for e in open_envs)
+        own_heading = last and (
+            kind_name in ("§", "Chapter", "Part", "Appendix")
+            or (not in_float_or_math and 0 <= line - last[2] <= 2
+                and (num is None or num == last[1])))
+        if own_heading:   # the heading's own label: show the key on the heading
+            p_, n_, l_, t_ = entries[last[0]]
+            entries[last[0]] = (p_, n_, l_, f"{t_}  ⟨{key}⟩")
+            return
+
+        if kind_name == "Eq.":
+            ref = f"Eq. ({num})" if num else "Eq."
+        else:
+            ref = " ".join(x for x in (kind_name, num) if x)
+        desc = f"⟨{key}⟩  {ref}".rstrip()
+        if page:
+            desc += f"  p.{page}"
+        if caption:
+            desc += "  — " + (caption[:70] + "…" if len(caption) > 70 else caption)
+        entries.append((path, line, state["level"] + 1, desc))
 
     def resolve(name, base):
         p = Path(name.strip())
@@ -695,45 +834,17 @@ def build_outline(root):
         visited.add(path)
         text = _strip_comments(path.read_text(encoding="utf-8", errors="replace"))
         envs, captions = [], []
+        skip_until = 0
         for m in OUTLINE_RE.finditer(text):
+            if m.start() < skip_until:
+                continue
             line = text.count("\n", 0, m.start()) + 1
             if m.group("sec"):
-                kind = m.group("sec")
-                title = _braced(text, m.end())
-                lvl = SECTION_LEVELS[kind]
-                state["level"] = lvl
-                num = None if m.group("star") else section_number(kind, title)
-                head = f"{num}  " if num else ("" if m.group("star") else "")
-                entries.append((path, line, lvl, f"{head}{_plain(title, labels)}"))
-                state["last_section"] = (len(entries) - 1, num, line)
+                add_section(path, line, m.group("sec"), m.group("star"), _braced(text, m.end()))
             elif m.group("label") is not None:
-                key = m.group("label")
-                info = labels.get(key, [])
-                num = info[0] if info else "?"
-                page = info[1] if len(info) > 1 else None
-                anchor = info[3] if len(info) > 3 else ""
-                kind = anchor.split(".")[0] if anchor else (envs[-1].rstrip("*") if envs else "")
-                kind_name = LABEL_KINDS.get(kind, kind.capitalize() if kind else "")
-                if kind_name == "Eq.":
-                    ref = f"Eq. ({num})"
-                elif kind_name:
-                    ref = f"{kind_name} {num}"
-                else:
-                    ref = num
-                desc = f"⟨{key}⟩  {ref}"
-                if page:
-                    desc += f"  p.{page}"
-                if captions and envs and envs[-1].rstrip("*") in ("figure", "table", "wrapfigure", "sidewaysfigure", "sidewaystable"):
-                    cap = captions[-1]
-                    desc += "  — " + (cap[:70] + "…" if len(cap) > 70 else cap)
-                last = state.get("last_section")
-                if (kind_name in ("§", "Chapter", "Part", "Appendix")
-                        or (last and last[1] == num and 0 <= line - last[2] <= 3)):
-                    if last:   # the heading's own label: show the key on the heading
-                        p_, n_, l_, t_ = entries[last[0]]
-                        entries[last[0]] = (p_, n_, l_, f"{t_}  ⟨{key}⟩")
-                    continue
-                entries.append((path, line, state["level"] + 1, desc))
+                float_open = any(e.rstrip("*") in FLOAT_ENVS for e in envs)
+                add_label(path, line, m.group("label"), envs,
+                          caption=captions[-1] if captions and float_open else None)
             elif m.group("inc"):
                 walk(resolve(m.group("incfile"), import_dir), import_dir)
             elif m.group("impfile") is not None:
@@ -741,13 +852,41 @@ def build_outline(root):
                 walk(resolve(m.group("impfile"), d), d)
             elif m.group("begin"):
                 envs.append(m.group("begin"))
-                if m.group("begin").rstrip("*") in ("figure", "table"):
+                if m.group("begin").rstrip("*") in FLOAT_ENVS:
                     captions.clear()
             elif m.group("end"):
                 if envs and envs[-1] == m.group("end"):
                     envs.pop()
             elif m.group("caption") is not None:
                 captions.append(_plain(_braced(text, m.end()), labels))
+            elif m.group("defname") or m.group("dname"):
+                # A macro definition: remember it if it wraps \section/\label,
+                # and don't read its body as document content.
+                body = _braced(text, m.end())
+                skip_until = m.end() + len(body) + 1
+                name = m.group("defname") or m.group("dname")
+                nargs = int(m.group("defn") or 0) if m.group("defname") \
+                    else len(m.group("dparams")) // 2
+                info = _macro_info(body, nargs)
+                if info:
+                    macros[name] = info
+                else:
+                    macros.pop(name, None)
+            elif m.group("envdef") is not None:
+                begin = _braced(text, m.end())
+                _, skip_until = _args(text, m.end() + len(begin) + 1, 1)
+            elif m.group("cmd") in macros:
+                info = macros[m.group("cmd")]
+                args, skip_until = _args(text, m.end(), info["nargs"])
+                arg = lambda i: args[i - 1] if 0 < i <= len(args) else ""
+                if info["sec"]:
+                    kind, star, i = info["sec"]
+                    add_section(path, line, kind, star, arg(i))
+                if info["label"]:
+                    pre, i, post = info["label"]
+                    cap = info["caption"]
+                    add_label(path, line, pre + arg(i) + post, envs, hint=info["kind"],
+                              caption=_plain(arg(cap), labels) if cap and not info["sec"] else None)
 
     walk(root.resolve(), root.parent)
     return entries
