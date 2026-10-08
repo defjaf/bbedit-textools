@@ -10,6 +10,8 @@ Requires only the macOS system python3 (3.9+).
 
 import fcntl
 import hashlib
+import json
+import shutil
 import os
 import re
 import subprocess
@@ -18,12 +20,15 @@ import time
 from pathlib import Path
 
 # --------------------------------------------------------------------------
-# User settings — edit to taste.
+# Settings.  Defaults are below; override any of them in
+#     ~/.config/bbedit-textools/settings.json
+# e.g. {"EXTRA_TEXINPUTS": ["~/texmf-local/inputs//"], "SHOW_BADBOXES": false}
+# so your choices survive reinstalling the package.
 # --------------------------------------------------------------------------
 
 # Extra directories searched for .sty/.cls/.bst etc. (a trailing // means
-# "and all subdirectories").  The empty entry keeps the system defaults.
-EXTRA_TEXINPUTS = ["~/home/tex/inputs//"]
+# "and all subdirectories").
+EXTRA_TEXINPUTS = []
 
 # Default engine when the root file has no "% !TEX program = ..." line.
 DEFAULT_PROGRAM = "pdflatex"
@@ -39,8 +44,18 @@ ACTIVATE_SKIM_ON_TYPESET = False
 
 TEXBIN = "/Library/TeX/texbin"
 DISPLAYLINE = "/Applications/Skim.app/Contents/SharedSupport/displayline"
-BBRESULTS = "/usr/local/bin/bbresults"
-BBEDIT = "/usr/local/bin/bbedit"
+_TOOL_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+BBRESULTS = shutil.which("bbresults", path=_TOOL_PATH) or "/usr/local/bin/bbresults"
+BBEDIT = shutil.which("bbedit", path=_TOOL_PATH) or "/usr/local/bin/bbedit"
+
+SETTINGS_FILE = Path("~/.config/bbedit-textools/settings.json").expanduser()
+try:
+    globals().update({k: v for k, v in json.loads(SETTINGS_FILE.read_text()).items()
+                      if k.isupper() and k in globals()})
+except FileNotFoundError:
+    pass
+except (OSError, ValueError) as _e:
+    sys.stderr.write(f"TeX Tools: ignoring {SETTINGS_FILE}: {_e}\n")
 
 LATEXMK_ENGINE_FLAG = {
     "pdflatex": "-pdf",

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Build dist/bbedit-textools-<version>.zip from the committed tree (HEAD).
+set -euo pipefail
+cd "$(dirname "$0")"
+version="${1:?usage: ./make-release <version, e.g. 0.1.0>}"
+mkdir -p dist
+git archive --format=zip --prefix="bbedit-textools-$version/" \
+    -o "dist/bbedit-textools-$version.zip" HEAD
+echo "dist/bbedit-textools-$version.zip"
