@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-# Sections and labels across the whole project, in document order, with numbers from the .aux.
+# Run bibtex or biber (whichever the document uses) once, and report .blg problems.
 import sys; from pathlib import Path
 sys.path.insert(0, str(next(d / "Resources" for d in Path(__file__).resolve().parents
                             if (d / "Resources" / "texlib.py").exists())))
-import texlib; texlib.cmd_outline()
+import texlib; texlib.cmd_bibliography()

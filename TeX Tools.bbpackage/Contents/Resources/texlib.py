@@ -452,8 +452,52 @@ def detach(func_name, *args):
                      stdin=subprocess.DEVNULL, start_new_session=True)
 
 
-def _typeset_worker(root, source, line, force="0"):
+def bibliography_tool(root):
+    """Return "bibtex", "biber" or None, judged from the files of the last LaTeX run."""
+    aux, bcf = root.with_suffix(".aux"), root.with_suffix(".bcf")
+    try:
+        if re.search(r"\\bibdata\{", aux.read_text(encoding="utf-8", errors="replace")):
+            return "bibtex"
+    except OSError:
+        pass
+    return "biber" if bcf.exists() else None
+
+
+def _build_command(root, mode):
+    """The command for a build mode: latexmk, force, single (one engine pass) or bib."""
+    prog = program_for(root)
+    if mode == "bib":
+        tool = bibliography_tool(root)
+        return [tool, root.stem] if tool else None, tool or "bibliography"
+    if mode == "single" and prog != "latex":
+        return [prog, "-interaction=nonstopmode", "-file-line-error", "-synctex=1",
+                root.name], f"{prog}, single pass"
+    cmd = ["latexmk", LATEXMK_ENGINE_FLAG[prog], "-interaction=nonstopmode",
+           "-file-line-error", "-synctex=1", "-silent"]
+    if mode == "force":
+        cmd.append("-gg")
+    return cmd + [root.name], prog
+
+
+def _latexmk_summary(r):
+    """Pull latexmk's "Collected error summary" lines out of its output."""
+    out = (r.stdout + "\n" + r.stderr).splitlines()
+    summary = []
+    if any("Collected error summary" in l for l in out):
+        k = next(i for i, l in enumerate(out) if "Collected error summary" in l)
+        for l in out[k + 1:]:
+            if not l.startswith("  "):
+                break
+            summary.append(l.strip())
+    return summary or [l for l in out if l.strip()][-1:] or ["(no output)"]
+
+
+def _typeset_worker(root, source, line, mode="latexmk"):
     root, source, line = Path(root), Path(source), int(line)
+    cmd, what = _build_command(root, mode)
+    if cmd is None:
+        notify(f"No \\bibliography or biblatex data in {root.stem}.aux — typeset first.")
+        return
     lockpath = Path(os.environ.get("TMPDIR", "/tmp")) / ("textools-" + hashlib.md5(str(root).encode()).hexdigest()[:12] + ".lock")
     with open(lockpath, "w") as lock:
         try:
@@ -461,39 +505,36 @@ def _typeset_worker(root, source, line, force="0"):
         except BlockingIOError:
             notify(f"{root.name} is already being typeset.")
             return
-        prog = program_for(root)
-        cmd = ["latexmk", LATEXMK_ENGINE_FLAG[prog], "-interaction=nonstopmode",
-               "-file-line-error", "-synctex=1", "-silent"]
-        if force == "1":
-            cmd.append("-gg")
-        cmd.append(root.name)
-        notify(f"Typesetting {root.name} ({prog})…")
+        verb = "Running" if mode == "bib" else "Typesetting"
+        notify(f"{verb} {root.name if mode != 'bib' else what} ({what if mode != 'bib' else root.stem})…")
         t0 = time.time()
         r = subprocess.run(cmd, cwd=root.parent, env=tex_env(),
                            capture_output=True, text=True)
         dt = time.time() - t0
 
-    issues = collect_issues(root)
+    if mode == "bib":
+        issues = parse_blg(root.with_suffix(".blg"))
+    else:
+        issues = collect_issues(root)
     n_err = sum(1 for i in issues if i[2] == "error")
     n_warn = sum(1 for i in issues if i[2] == "warning")
     if r.returncode != 0 and n_err == 0:
-        # latexmk failed for a reason the log doesn't explain — show its output.
-        out = (r.stdout + "\n" + r.stderr).splitlines()
-        summary = []
-        if any("Collected error summary" in l for l in out):
-            k = next(i for i, l in enumerate(out) if "Collected error summary" in l)
-            for l in out[k + 1:]:
-                if not l.startswith("  "):
-                    break
-                summary.append(l.strip())
-        summary = summary or [l for l in out if l.strip()][-1:] or ["(no output)"]
-        for msg in summary:
-            issues.append((root, 1, "error", "latexmk: " + msg))
-        n_err = len(summary)
+        # The tool failed for a reason the log doesn't explain — show its output.
+        msgs = _latexmk_summary(r) if cmd[0] == "latexmk" else \
+            [l for l in (r.stdout + "\n" + r.stderr).splitlines() if l.strip()][-3:] or ["(no output)"]
+        if mode == "single":
+            msgs = [f"exited with status {r.returncode} without a parsable error; see the log"]
+        for msg in msgs:
+            issues.append((root, 1, "error", f"{cmd[0]}: {msg}"))
+        n_err = len(msgs)
 
     pdf = root.with_suffix(".pdf")
     if n_err:
-        notify(f"{n_err} error(s), {n_warn} warning(s) — {root.name}", sound="Basso")
+        notify(f"{n_err} error(s), {n_warn} warning(s) — {what}", title=f"TeX Tools: {root.name}",
+               sound="Basso")
+    elif mode == "bib":
+        notify(f"Done in {dt:.1f}s — {n_warn} warning(s). Typeset to update the PDF.",
+               title=f"{what}: {root.stem}")
     else:
         notify(f"OK in {dt:.1f}s — {n_warn} warning(s)", title=f"TeX Tools: {root.name}")
         if FORWARD_SEARCH_AFTER_TYPESET and pdf.exists():
@@ -502,10 +543,18 @@ def _typeset_worker(root, source, line, force="0"):
         show_results(format_issues(issues))
 
 
-def cmd_typeset(force=False):
+def cmd_typeset(force=False, mode=None):
     path, line = front_document(save=True)
     root = find_root(path)
-    detach("_typeset_worker", root, path, line, "1" if force else "0")
+    detach("_typeset_worker", root, path, line, mode or ("force" if force else "latexmk"))
+
+
+def cmd_typeset_single():
+    cmd_typeset(mode="single")
+
+
+def cmd_bibliography():
+    cmd_typeset(mode="bib")
 
 
 def cmd_view():
