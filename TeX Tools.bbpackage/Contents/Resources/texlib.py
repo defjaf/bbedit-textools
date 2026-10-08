@@ -783,8 +783,9 @@ def build_outline(root):
         lvl = SECTION_LEVELS[kind]
         state["level"] = lvl
         num = None if star else section_number(kind, title)
-        head = f"{num}  " if num else ""
-        entries.append((path, line, lvl, f"{head}{_plain(title, labels)}"))
+        mark = {"part": "Part", "chapter": "Chapter", "paragraph": "¶"}.get(kind, "§")
+        head = f"{mark} {num}" if num else mark
+        entries.append((path, line, lvl, f"{head}  {_plain(title, labels)}"))
         state["last_section"] = (len(entries) - 1, num, line)
 
     def add_label(path, line, key, envs, hint=None, caption=None):
@@ -814,7 +815,7 @@ def build_outline(root):
             ref = f"Eq. ({num})" if num else "Eq."
         else:
             ref = " ".join(x for x in (kind_name, num) if x)
-        desc = f"⟨{key}⟩  {ref}".rstrip()
+        desc = f"{ref}  ⟨{key}⟩" if ref else f"⟨{key}⟩"
         if page:
             desc += f"  p.{page}"
         if caption:
@@ -892,6 +893,38 @@ def build_outline(root):
     return entries
 
 
+OUTLINE_SCRIPT = """
+on run argv
+    set winTitle to item 1 of argv
+    set fileRefs to {}
+    repeat with i from 2 to (count of argv) by 3
+        set end of fileRefs to POSIX file (item i of argv)
+    end repeat
+    tell application "BBEdit"
+        set entries to {}
+        set k to 1
+        repeat with i from 2 to (count of argv) by 3
+            set end of entries to {result_kind:note_kind, result_file:(item k of fileRefs), result_line:((item (i + 1) of argv) as integer), message:(item (i + 2) of argv)}
+            set k to k + 1
+        end repeat
+        set stale to {}
+        repeat with w in windows
+            try
+                if name of w is winTitle then set end of stale to contents of w
+            end try
+        end repeat
+        repeat with w in stale
+            try
+                close w
+            end try
+        end repeat
+        make new results browser with data entries with properties {name:winTitle}
+        activate
+    end tell
+end run
+"""
+
+
 def cmd_outline():
     path, _ = front_document(save=True)
     root = find_root(path)
@@ -900,5 +933,10 @@ def cmd_outline():
         notify(f"No sections or labels found in {root.name}.")
         return
     top = min(e[2] for e in entries)
-    indent = "\u2003\u2003"   # em spaces survive the results browser's trimming
-    show_results([f"{p}:{n}: note: {indent * (lvl - top)}{t}" for p, n, lvl, t in entries])
+    argv = [f"Outline — {root.name}"]
+    for p, n, lvl, t in entries:
+        argv += [str(p), str(n), "   " * (lvl - top) + t]
+    r = subprocess.run(["/usr/bin/osascript", "-e", OUTLINE_SCRIPT, *argv],
+                       capture_output=True, text=True)
+    if r.returncode != 0:   # fall back to bbresults
+        show_results([f"{p}:{n}: note: {'   ' * (lvl - top)}{t}" for p, n, lvl, t in entries])

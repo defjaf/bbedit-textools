@@ -34,7 +34,7 @@ Then, once:
 | Typeset (force full rebuild) | Same, with `latexmk -gg`. |
 | View PDF at Cursor | SyncTeX forward search into Skim. |
 | Show Errors & Warnings | Re-parse the existing log without compiling. |
-| Project Outline | Every `\part`…`\paragraph` and `\label` across the root file and all `\input`/`\include`/`\import` files, in document order, with numbers and pages from the `.aux` (e.g. `2.1 Methods`, `⟨fig:setup⟩ Figure 3 p.4 — caption…`). Click to jump. Typeset first for numbers. |
+| Project Outline | Every `\part`…`\paragraph` and `\label` across the root file and all `\input`/`\include`/`\import` files, in document order, with numbers and pages from the `.aux` (e.g. `§ 2.1  Methods  ⟨sec:methods⟩`, `Figure 3  ⟨fig:setup⟩  p.4 — caption…`), in a window titled *Outline — file.tex* that is replaced on each run. Understands your own macros that wrap `\section` or `\label`. Click to jump. Typeset first for numbers. (BBEdit labels every entry "Note"; that can't be changed.) |
 | Open Log File / Open Root File | |
 | Word Count | `texcount -inc` over the whole document. |
 | Clean Auxiliary Files | `latexmk -c`: keeps PDF, SyncTeX and `.bbl`. |
