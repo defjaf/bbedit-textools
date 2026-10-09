@@ -42,10 +42,6 @@ FORWARD_SEARCH_AFTER_TYPESET = True
 # Bring Skim to the front on typeset (False keeps BBEdit focused).
 ACTIVATE_SKIM_ON_TYPESET = False
 
-# What "Typeset (or Run if not TeX)" — meant for ⌘R — does on a TeX document:
-# "latexmk" (full Typeset), "single" (one engine pass) or "force".
-RUN_MENU_MODE = "latexmk"
-
 TEXBIN = "/Library/TeX/texbin"
 DISPLAYLINE = "/Applications/Skim.app/Contents/SharedSupport/displayline"
 _TOOL_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
@@ -566,51 +562,6 @@ def cmd_typeset(force=False, mode=None):
     path, line = front_document(save=True)
     root = find_root(path)
     detach("_typeset_worker", root, path, line, mode or ("force" if force else "latexmk"))
-
-
-CLICK_RUN_SCRIPT = """
-delay 0.2
-tell application "BBEdit" to activate
-tell application "System Events" to tell process "BBEdit"
-    repeat with m in menu bar items of menu bar 1
-        try
-            if exists menu item "Run in Terminal" of menu 1 of m then
-                click menu item "Run" of menu 1 of m
-                return "ok"
-            end if
-        end try
-    end repeat
-end tell
-return "no #! menu found"
-"""
-
-
-def _click_run_worker():
-    r = subprocess.run(["/usr/bin/osascript", "-e", CLICK_RUN_SCRIPT],
-                       capture_output=True, text=True)
-    if r.returncode != 0 or r.stdout.strip() != "ok":
-        notify("Couldn't choose #! → Run. Allow BBEdit in System Settings → "
-               "Privacy & Security → Accessibility, then try again.")
-
-
-def cmd_typeset_or_run():
-    """⌘R: typeset a TeX document, otherwise BBEdit's own #! → Run."""
-    out = osascript("""
-    tell application "BBEdit"
-        repeat with w in (every text window)
-            try
-                return POSIX path of ((file of (active document of w)) as alias)
-            end try
-        end repeat
-        return ""
-    end tell
-    """)
-    if out.lower().endswith(TEX_DOC_SUFFIXES):
-        cmd_typeset(mode=RUN_MENU_MODE if RUN_MENU_MODE in ("latexmk", "single", "force") else "latexmk")
-    else:
-        # BBEdit has no scriptable Run, so press the menu item, from a
-        # separate process once this script has returned.
-        detach("_click_run_worker")
 
 
 def cmd_typeset_single():

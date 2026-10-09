@@ -11,5 +11,4 @@ First public release.
 - Root-file and engine detection via `% !TEX root` / `% !TEX program`.
 - Three cleanup levels with a summary notification; word count.
 - texlab configuration for inline diagnostics, completion and navigation.
-- Typeset (or Run if not TeX), for ⌘R: typesets TeX documents and chooses BBEdit's #! → Run for everything else.
 - Personal settings in `~/.config/bbedit-textools/settings.json`.
