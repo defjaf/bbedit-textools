@@ -35,14 +35,19 @@ Then, once:
 2. **Skim → Settings → Sync**: tick *Check for file changes*; Preset **BBEdit**.
 3. **BBEdit → Settings → Menus & Shortcuts → Scripts → TeX Tools**: assign keys to anything else you use often (e.g. ⇧⌘R Typeset (single pass), ⌥⌘R View PDF, ⇧⌘O Project Outline). Leave ⌘R alone: see below.
 
-### ⌘R: Run for scripts, Typeset for TeX
+### ⌘R: Typeset for TeX, Run for everything else
 
-`install` also adds a menu attachment script, `Menu Scripts/#!•Run.scpt`. BBEdit calls it whenever **#! → Run** (⌘R) is chosen. If the front document is a `.tex`/`.bib`/`.sty`/`.cls` file it typesets instead; for anything else BBEdit's normal Run proceeds. Set `"RUN_MENU_MODE"` to `"single"` in your settings file to make ⌘R a single pass instead of a full latexmk Typeset. An existing `#!•Run` script of your own is never overwritten. To remove the hook, delete that file.
+BBEdit greys out the **#!** menu for TeX documents, and a shortcut can belong to only one menu item, so ⌘R can't simply be shared. Instead:
+
+1. In **Settings → Menus & Shortcuts**, remove ⌘R from **#! → Run** and give it to **Scripts → TeX Tools → Typeset (or Run if not TeX)**.
+2. That command typesets when the front document is a `.tex`/`.bib`/`.sty`/`.cls` file (a full Typeset, or a single pass with `"RUN_MENU_MODE": "single"` in your settings). For any other document it chooses BBEdit's own **#! → Run** for you, so scripts behave exactly as before.
+3. Choosing #! → Run from a script needs a one-time permission: **System Settings → Privacy & Security → Accessibility → BBEdit** on. If it's missing you'll get a notification saying so.
 
 ## Commands
 
 | Command | |
 |---|---|
+| Typeset (or Run if not TeX) | For ⌘R: Typeset on TeX documents, BBEdit's #! → Run on anything else (see above). |
 | Typeset | Saves modified documents and runs `latexmk` on the root file **without blocking BBEdit**: it reruns until references settle and runs BibTeX/biber/makeindex as needed. Afterwards: a notification with error/warning counts; a results browser listing every error, warning, bad box and BibTeX/biber problem (double-click jumps to the file and line, including `\input` files and `.bib` entries); on success, Skim scrolls to the cursor position. |
 | Typeset (single pass) | One run of the engine only, like TextMate's ⌘R: the fastest feedback for text edits. New references/citations need a full Typeset (or Run BibTeX or Biber + another pass). |
 | View PDF at Cursor | SyncTeX forward search into Skim. |
