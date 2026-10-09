@@ -42,6 +42,23 @@ FORWARD_SEARCH_AFTER_TYPESET = True
 # Bring Skim to the front on typeset (False keeps BBEdit focused).
 ACTIVATE_SKIM_ON_TYPESET = False
 
+# Git ▸ Sync: ask for a commit message (pre-filled) instead of writing one.
+GIT_ASK_COMMIT_MESSAGE = False
+
+# Where Git ▸ Sync/Pull ignore LaTeX build products:
+#   "local"     — .git/info/exclude (private to your clone; collaborators see nothing)
+#   "gitignore" — create a shared .gitignore if the project has none
+#   "off"       — neither.  Build products are never committed in any case.
+GIT_IGNORE_BUILD_FILES = "local"
+
+BUILD_FILE_PATTERNS = [
+    "*.aux", "*.log", "*.out", "*.toc", "*.lof", "*.lot", "*.fls", "*.fdb_latexmk",
+    "*.synctex.gz", "*.synctex", "*.synctex(busy)", "*.bbl", "*.blg", "*.bcf",
+    "*.run.xml", "*.idx", "*.ilg", "*.ind", "*.nav", "*.snm", "*.vrb", "*.xdv",
+    "*.dvi", "*.glo", "*.gls", "*.glg", "*.ist", "*.acn", "*.acr", "*.alg",
+    "*.thm", "*.loa", "*.spl", "*.brf", "*.pdf", ".DS_Store",
+]
+
 TEXBIN = "/Library/TeX/texbin"
 DISPLAYLINE = "/Applications/Skim.app/Contents/SharedSupport/displayline"
 _TOOL_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
@@ -1004,3 +1021,203 @@ def cmd_outline():
                        capture_output=True, text=True)
     if r.returncode != 0:   # fall back to bbresults
         show_results([f"{p}:{n}: note: {'   ' * (lvl - top)}{t}" for p, n, lvl, t in entries])
+
+
+# --------------------------------------------------------------------------
+# Git (Overleaf and other remotes)
+# --------------------------------------------------------------------------
+#
+# Overleaf turns web edits into git commits only when someone fetches, and
+# can rate-limit automatic polling, so syncing is an explicit command:
+# commit local work, pull --rebase (web edits first, yours on top), push.
+
+import fnmatch
+import socket
+from datetime import datetime
+
+GIT_MARKER = "# Added by TeX Tools (LaTeX build products)"
+
+
+def _git(repo, *args, check=False):
+    env = tex_env()
+    env["GIT_TERMINAL_PROMPT"] = "0"      # fail instead of waiting for a password
+    env["GIT_EDITOR"] = "true"            # rebase --continue without an editor
+    r = subprocess.run(["git", *args], cwd=repo, env=env, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip())
+    return r
+
+
+def _git_dir(repo):
+    return Path(repo) / _git(repo, "rev-parse", "--git-dir").stdout.strip()
+
+
+def _repo_for(path):
+    r = _git(Path(path).parent, "rev-parse", "--show-toplevel")
+    return Path(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def _is_build_file(name):
+    base = os.path.basename(name)
+    return any(fnmatch.fnmatch(base, pat) for pat in BUILD_FILE_PATTERNS)
+
+
+def _ensure_ignores(repo):
+    mode = GIT_IGNORE_BUILD_FILES
+    if mode == "local":
+        exclude = _git_dir(repo) / "info" / "exclude"
+        text = exclude.read_text() if exclude.exists() else ""
+        if GIT_MARKER not in text:
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            exclude.write_text(text.rstrip("\n") + "\n\n" + GIT_MARKER + "\n"
+                               + "\n".join(BUILD_FILE_PATTERNS) + "\n")
+    elif mode == "gitignore":
+        gi = Path(repo) / ".gitignore"
+        if not gi.exists():
+            gi.write_text(GIT_MARKER + "\n" + "\n".join(BUILD_FILE_PATTERNS) + "\n")
+            notify("Created .gitignore for LaTeX build files.")
+
+
+def _rebase_in_progress(repo):
+    g = _git_dir(repo)
+    return (g / "rebase-merge").exists() or (g / "rebase-apply").exists()
+
+
+def _conflict_markers(repo, files):
+    """Results-window lines for every conflict marker in the given files."""
+    lines = []
+    for f in files:
+        p = Path(repo) / f
+        try:
+            for n, l in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if l.startswith("<<<<<<< "):
+                    lines.append(f"{p}:{n}: error: conflict: top part (to =======) is the remote's text, "
+                                 "bottom part is yours. Keep what you want, delete the marker lines, "
+                                 "save, then Git ▸ Sync again")
+        except OSError:
+            lines.append(f"{p}:1: error: conflict in a file that can't be shown as text")
+    return lines
+
+
+def _unmerged(repo):
+    return [f for f in _git(repo, "diff", "--name-only", "--diff-filter=U").stdout.splitlines() if f]
+
+
+def _stage(repo):
+    """Stage tracked changes and new non-build files; return True if anything is staged."""
+    _git(repo, "add", "--update")
+    new = [f for f in _git(repo, "ls-files", "--others", "--exclude-standard").stdout.splitlines()
+           if f and not _is_build_file(f)]
+    if new:
+        _git(repo, "add", "--", *new)
+    return _git(repo, "diff", "--cached", "--quiet").returncode != 0
+
+
+def _commit_message():
+    auto = f"Edits from {socket.gethostname().split('.')[0]}, {datetime.now():%Y-%m-%d %H:%M}"
+    if not GIT_ASK_COMMIT_MESSAGE:
+        return auto
+    esc = auto.replace("\\", "\\\\").replace('"', '\\"')
+    try:
+        return osascript(f'tell application "BBEdit" to text returned of (display dialog '
+                         f'"Commit message:" default answer "{esc}" with title "TeX Tools: Sync")') or auto
+    except RuntimeError:
+        return None   # cancelled
+
+
+def _report_conflicts(repo, what):
+    files = _unmerged(repo)
+    show_results(_conflict_markers(repo, files))
+    notify(f"{what}: conflicts in {len(files)} file(s). Fix them, save, then Git ▸ Sync again.",
+           title="TeX Tools: Git", sound="Basso")
+
+
+def _git_worker(path, action):
+    repo = _repo_for(path)
+    if repo is None:
+        notify(f"{Path(path).name} isn't in a git repository.", title="TeX Tools: Git")
+        return
+    lockpath = Path(os.environ.get("TMPDIR", "/tmp")) / ("textools-git-" + hashlib.md5(str(repo).encode()).hexdigest()[:12] + ".lock")
+    with open(lockpath, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            notify("A git operation is already running for this project.", title="TeX Tools: Git")
+            return
+        try:
+            _git_sync(repo, action)
+        except RuntimeError as e:
+            msg = str(e).splitlines()[-1] if str(e) else "git failed"
+            if "Authentication" in str(e) or "could not read Username" in str(e):
+                msg = ("authentication failed. For Overleaf, use a git authentication token "
+                       "(Account Settings) and let the macOS keychain store it.")
+            notify(f"{action.capitalize()} stopped: {msg}", title="TeX Tools: Git", sound="Basso")
+
+
+def _git_sync(repo, action):
+    _ensure_ignores(repo)
+    if not _git(repo, "remote").stdout.strip():
+        raise RuntimeError("this repository has no remote")
+
+    # Finishing an interrupted rebase (after the user resolved conflicts).
+    if _rebase_in_progress(repo):
+        files = _unmerged(repo)
+        left = _conflict_markers(repo, files)
+        if left:
+            show_results(left)
+            notify(f"Still {len(left)} conflict(s) to resolve.", title="TeX Tools: Git", sound="Basso")
+            return
+        if files:
+            _git(repo, "add", "--", *files)
+        r = _git(repo, "rebase", "--continue")
+        if r.returncode != 0:
+            if _unmerged(repo):
+                _report_conflicts(repo, "Sync")
+                return
+            raise RuntimeError((r.stderr or r.stdout).strip())
+
+    if action == "sync" and _stage(repo):
+        msg = _commit_message()
+        if msg is None:
+            _git(repo, "reset", "--quiet")
+            notify("Sync cancelled.", title="TeX Tools: Git")
+            return
+        _git(repo, "commit", "--quiet", "-m", msg, check=True)
+
+    def upstream():
+        return _git(repo, "rev-parse", "--verify", "--quiet", "@{u}").stdout.strip()
+
+    pulled, pushed = 0, False
+    for attempt in (1, 2):
+        before = upstream()
+        r = _git(repo, "pull", "--rebase", "--autostash", "--quiet")
+        if r.returncode != 0:
+            if _rebase_in_progress(repo) or _unmerged(repo):
+                _report_conflicts(repo, action.capitalize())
+                return
+            raise RuntimeError((r.stderr or r.stdout).strip())
+        after = upstream()
+        if before and after and before != after:
+            pulled += int(_git(repo, "rev-list", "--count", f"{before}..{after}").stdout.strip() or 0)
+        if action != "sync":
+            break
+        ahead = int(_git(repo, "rev-list", "--count", "@{u}..HEAD").stdout.strip() or 0)
+        if not ahead:
+            break
+        p = _git(repo, "push", "--quiet")
+        if p.returncode == 0:
+            pushed = True
+            break
+        if attempt == 2 or "rejected" not in (p.stderr + p.stdout):
+            raise RuntimeError((p.stderr or p.stdout).strip())
+        # Someone pushed in between: pull again and retry once.
+
+    parts = [f"Pulled {pulled} change(s)" if pulled else "Already up to date"]
+    if action == "sync":
+        parts.append("pushed your changes" if pushed else "nothing to push")
+    notify("; ".join(parts), title=f"TeX Tools: {repo.name}")
+
+
+def cmd_git(action):
+    path, _ = front_document(save=True)
+    detach("_git_worker", path, action)

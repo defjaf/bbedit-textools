@@ -50,9 +50,26 @@ Then, once:
 | Clean ▸ For Submission | Also removes `.synctex.gz`; keeps PDF and `.bbl` (arXiv and journals need the `.bbl`). |
 | Clean ▸ Everything | `latexmk -C` plus `.bbl`: sources only. |
 | Open ▸ Root File / Log File | |
+| Git ▸ Sync | Commit your changes, `pull --rebase` (others' edits first, yours on top), push. Made for Overleaf's git integration but works with any remote. Never commits build products, never force-pushes; if someone pushed in between, it pulls and retries once. |
+| Git ▸ Pull | Bring in others' edits only (`pull --rebase --autostash`); your uncommitted edits are kept. |
 | Word Count | `texcount -inc` over the whole document. |
 
 Each clean shows one notification listing the file types removed.
+
+### Working with Overleaf (or any shared git remote)
+
+Overleaf turns web edits into git commits only when someone fetches, and may rate-limit automatic polling, so syncing is a deliberate command: **Git ▸ Pull** when you sit down, **Git ▸ Sync** whenever you finish a chunk. BBEdit reloads files that change on disk.
+
+If both sides changed the same lines, Sync stops and lists each conflict in a results window. In each conflict the part above `=======` is the remote's text and the part below is yours. Keep what you want, delete the marker lines, save, and Sync again: it finishes the rebase and pushes.
+
+Good habits with web collaborators:
+
+- **One sentence per line** in the source. Git compares lines, so this is the biggest single reducer of conflicts.
+- **Pull before you start; sync little and often.**
+- **Don't mix git edits with Overleaf's tracked changes or comments** on the same text: Overleaf warns that pushes can lose or displace them.
+- Authenticate with an Overleaf **git token** (Account Settings) and let the macOS keychain remember it; Sync never prompts for a password, it just reports the failure.
+
+Commit messages are automatic ("Edits from <your Mac>, <date time>") unless `GIT_ASK_COMMIT_MESSAGE` is on. Build files are ignored privately in `.git/info/exclude` by default, so collaborators see no new files; `GIT_IGNORE_BUILD_FILES` can be `"gitignore"` (create a shared `.gitignore` if missing) or `"off"`.
 
 ### Root file and engine
 
@@ -75,7 +92,9 @@ Defaults are at the top of `TeX Tools.bbpackage/Contents/Resources/texlib.py`. O
   "DEFAULT_PROGRAM": "lualatex",
   "SHOW_BADBOXES": false,
   "FORWARD_SEARCH_AFTER_TYPESET": true,
-  "ACTIVATE_SKIM_ON_TYPESET": false
+  "ACTIVATE_SKIM_ON_TYPESET": false,
+  "GIT_ASK_COMMIT_MESSAGE": false,
+  "GIT_IGNORE_BUILD_FILES": "local"
 }
 ```
 

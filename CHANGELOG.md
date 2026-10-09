@@ -11,4 +11,5 @@ First public release.
 - Root-file and engine detection via `% !TEX root` / `% !TEX program`.
 - Three cleanup levels with a summary notification; word count.
 - texlab configuration for inline diagnostics, completion and navigation.
+- Git ▸ Sync and Git ▸ Pull for Overleaf and other shared remotes: commit, pull --rebase, push, with conflicts in a clickable results window.
 - Personal settings in `~/.config/bbedit-textools/settings.json`.
