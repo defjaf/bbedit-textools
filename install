@@ -21,4 +21,17 @@ if [ -f "$conf" ] && ! cmp -s "$here/texlab.json" "$conf"; then
 fi
 cp "$here/texlab.json" "$conf"
 echo "Installed texlab   → $conf"
+# ⌘R (#! → Run) typesets TeX documents: compile the menu attachment script.
+menu_dir="$support/Menu Scripts"
+attach="$menu_dir/#!•Run.scpt"
+mkdir -p "$menu_dir"
+if [ -e "$attach" ] && ! osadecompile "$attach" 2>/dev/null | grep -q "TeX Tools"; then
+    echo "Skipped ⌘R hook: $attach already exists and isn't ours."
+else
+    tmp="$(mktemp -t textools).applescript"
+    sed "s|@RUNNER@|$pkg/Contents/Resources/run_menu.py|" \
+        "$here/menu-scripts/#!•Run.applescript" > "$tmp"
+    osacompile -o "$attach" "$tmp" && rm -f "$tmp"
+    echo "Installed ⌘R hook → $attach"
+fi
 echo "Script changes take effect immediately; relaunch BBEdit if new menu items don't appear."

@@ -42,6 +42,11 @@ FORWARD_SEARCH_AFTER_TYPESET = True
 # Bring Skim to the front on typeset (False keeps BBEdit focused).
 ACTIVATE_SKIM_ON_TYPESET = False
 
+# What #! → Run (⌘R) does on a TeX document, via the "#!•Run" menu attachment
+# script that ./install puts in BBEdit's Menu Scripts folder:
+# "latexmk" (full Typeset), "single" (one engine pass) or "force".
+RUN_MENU_MODE = "latexmk"
+
 TEXBIN = "/Library/TeX/texbin"
 DISPLAYLINE = "/Applications/Skim.app/Contents/SharedSupport/displayline"
 _TOOL_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
@@ -562,6 +567,11 @@ def cmd_typeset(force=False, mode=None):
     path, line = front_document(save=True)
     root = find_root(path)
     detach("_typeset_worker", root, path, line, mode or ("force" if force else "latexmk"))
+
+
+def cmd_run_menu():
+    """Entry point for the #!•Run attachment script (⌘R on a TeX document)."""
+    cmd_typeset(mode=RUN_MENU_MODE if RUN_MENU_MODE in ("latexmk", "single", "force") else "latexmk")
 
 
 def cmd_typeset_single():

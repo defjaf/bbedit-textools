@@ -33,7 +33,11 @@ Then, once:
 
 1. **BBEdit → Settings → Languages → TeX → Server**: select texlab and set *Configuration* to `texlab.json`. Relaunch BBEdit.
 2. **Skim → Settings → Sync**: tick *Check for file changes*; Preset **BBEdit**.
-3. **BBEdit → Settings → Menus & Shortcuts → Scripts → TeX Tools**: assign keys (e.g. ⌘R Typeset single pass, ⇧⌘R Typeset, ⌥⌘R View PDF, ⇧⌘O Project Outline).
+3. **BBEdit → Settings → Menus & Shortcuts → Scripts → TeX Tools**: assign keys to anything else you use often (e.g. ⇧⌘R Typeset (single pass), ⌥⌘R View PDF, ⇧⌘O Project Outline). Leave ⌘R alone: see below.
+
+### ⌘R: Run for scripts, Typeset for TeX
+
+`install` also adds a menu attachment script, `Menu Scripts/#!•Run.scpt`. BBEdit calls it whenever **#! → Run** (⌘R) is chosen. If the front document is a `.tex`/`.bib`/`.sty`/`.cls` file it typesets instead; for anything else BBEdit's normal Run proceeds. Set `"RUN_MENU_MODE"` to `"single"` in your settings file to make ⌘R a single pass instead of a full latexmk Typeset. An existing `#!•Run` script of your own is never overwritten. To remove the hook, delete that file.
 
 ## Commands
 
@@ -75,7 +79,8 @@ Defaults are at the top of `TeX Tools.bbpackage/Contents/Resources/texlib.py`. O
   "DEFAULT_PROGRAM": "lualatex",
   "SHOW_BADBOXES": false,
   "FORWARD_SEARCH_AFTER_TYPESET": true,
-  "ACTIVATE_SKIM_ON_TYPESET": false
+  "ACTIVATE_SKIM_ON_TYPESET": false,
+  "RUN_MENU_MODE": "latexmk"
 }
 ```
 
