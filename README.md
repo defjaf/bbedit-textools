@@ -19,7 +19,7 @@ A TextMate-LaTeX-bundle-style workflow for [BBEdit](https://www.barebones.com/pr
 
 ## Install
 
-Either download the latest release zip from the [Releases page](https://github.com/defjaf/bbedit-textools/releases), unzip it and run `./install` from Terminal in the unzipped folder, or:
+**Option 1: with the install script (recommended).** Download the latest release zip from the [Releases page](https://github.com/defjaf/bbedit-textools/releases), unzip it and run `./install` from Terminal in the unzipped folder, or:
 
 ```sh
 git clone https://github.com/defjaf/bbedit-textools.git
@@ -29,7 +29,12 @@ cd bbedit-textools
 
 `install` copies the package into BBEdit's `Packages` folder and `texlab.json` into `Language Servers/Configuration` (the iCloud-synced support folder if you use one). To update, pull or download again and rerun `./install`. If you hack on it, edit in the repo and rerun `./install`; edits to the installed copy are overwritten.
 
-Then, once:
+**Option 2: by hand, no Terminal.** From the unzipped release:
+
+1. Double-click `TeX Tools.bbpackage` (or drag it onto BBEdit's Dock icon). BBEdit copies it into its `Packages` folder and offers to relaunch; accept so the TeX Tools menu appears. The original is left where it was, so you can delete the download afterwards.
+2. Copy `texlab.json` into the `Language Servers/Configuration` folder of BBEdit's application support folder (create `Configuration` if it doesn't exist). *BBEdit → Folders → Application Support* opens that folder in the Finder.
+
+Either way, then, once:
 
 1. **BBEdit → Settings → Languages → TeX → Server**: select texlab and set *Configuration* to `texlab.json`. Relaunch BBEdit.
 2. **Skim → Settings → Sync**: tick *Check for file changes*; Preset **BBEdit**.
