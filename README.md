@@ -8,6 +8,8 @@ A TextMate-LaTeX-bundle-style workflow for [BBEdit](https://www.barebones.com/pr
 | **TeX Tools.bbpackage** (Scripts menu → TeX Tools) | typeset with latexmk in the background; parse `.log`/`.blg` into a clickable BBEdit results browser; whole-project outline; SyncTeX forward search to Skim; root-file handling; cleanup; word count |
 | **[Skim](https://skim-app.sourceforge.io)** | PDF preview, auto-reload, inverse search (⌘⇧-click → BBEdit) |
 
+![Typeset: BBEdit's results window lists LaTeX warnings by file and line (an undefined citation, overfull boxes); the cursor is on the undefined citation, and Skim shows the same place in the PDF.](docs/typeset-results.png)
+
 ## Requirements
 
 - macOS (Apple Silicon or Intel) and **BBEdit 16** (earlier versions with LSP support probably work but are untested).
@@ -60,6 +62,8 @@ Either way, then, once:
 | Word Count | `texcount -inc` over the whole document. |
 
 Each clean shows one notification listing the file types removed.
+
+![Project Outline: sections, figures and equations across all the files of a multi-file document, numbered from the .aux, with captions; items excluded from the build are marked "(not in PDF)".](docs/outline.png)
 
 ### Working with Overleaf (or any shared git remote)
 
