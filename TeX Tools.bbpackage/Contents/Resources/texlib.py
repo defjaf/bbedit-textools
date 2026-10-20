@@ -909,7 +909,11 @@ def build_outline(root):
     """
     root = Path(root)
     labels, toc = {}, []
+    have_aux = root.with_suffix(".aux").exists()
     _read_aux(root.with_suffix(".aux"), labels, toc, set())
+    # A label missing from an existing .aux was not typeset (e.g. inside
+    # \iffalse or a macro that discards its argument).
+    NOT_IN_PDF = "  (not in PDF)"
     toc_pos = 0
     entries = []
     visited = set()
@@ -953,9 +957,10 @@ def build_outline(root):
             kind_name in ("§", "Chapter", "Part", "Appendix")
             or (not in_float_or_math and 0 <= line - last[2] <= 2
                 and (num is None or num == last[1])))
+        excluded = have_aux and key not in labels
         if own_heading:   # the heading's own label: show the key on the heading
             p_, n_, l_, t_ = entries[last[0]]
-            entries[last[0]] = (p_, n_, l_, f"{t_}  ⟨{key}⟩")
+            entries[last[0]] = (p_, n_, l_, f"{t_}  ⟨{key}⟩" + (NOT_IN_PDF if excluded else ""))
             return
 
         if kind_name == "Eq.":
@@ -965,6 +970,8 @@ def build_outline(root):
         desc = f"{ref}  ⟨{key}⟩" if ref else f"⟨{key}⟩"
         if page:
             desc += f"  p.{page}"
+        if excluded:
+            desc += NOT_IN_PDF
         if caption:
             desc += "  — " + (caption[:70] + "…" if len(caption) > 70 else caption)
         entries.append((path, line, state["level"] + 1, desc))
