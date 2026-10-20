@@ -130,6 +130,8 @@ def front_document(save=True):
         {save_part}
         repeat with w in (every text window)
             try
+                -- a results window "shows" the file of its selected entry; skip it
+                if class of w is in {{results browser, search results browser}} then error number 1
                 set p to POSIX path of ((file of (active document of w)) as alias)
                 if {suffixes} then
                     set l to 1
@@ -192,43 +194,94 @@ def magic_comments(path, max_lines=30):
     return out
 
 
-def has_documentclass(path):
+ROOT_MARKER_RE = re.compile(r"^[^%\n]*\\(documentclass|begin\s*\{document\}|end\s*\{document\})", re.M)
+INCLUDE_RE = re.compile(r"\\(?:input|include|subfile|bibliography|addbibresource)\s*\{([^}]*)\}"
+                        r"|\\(?:sub)?import\*?\s*\{([^}]*)\}\s*\{([^}]*)\}")
+
+
+def _read(path):
     try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
+        return Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
+        return ""
+
+
+def is_root_like(path):
+    """A document root: has \\documentclass, \\begin{document} or \\end{document}
+    (the preamble may live in an \\input file)."""
+    return ROOT_MARKER_RE.search(_read(path)) is not None
+
+
+def _includes(cand, target):
+    """Does .tex file `cand` \\input/\\include/... the file `target`?"""
+    text = re.sub(r"(?<!\\)%.*", "", _read(cand))
+    for m in INCLUDE_RE.finditer(text):
+        for name in (m.group(1), (m.group(2) or "") + (m.group(3) or "")):
+            for part in (name or "").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                # LaTeX resolves paths from the root's folder, which may be
+                # above `cand` when `cand` is itself an included file.
+                bases = [Path("/")] if part.startswith("/") else [cand.parent, *list(cand.parents)[1:4]]
+                for base in bases:
+                    p = base / part
+                    for q in (p, p.with_name(p.name + ".tex"), p.with_name(p.name + ".bib")):
+                        try:
+                            if q.resolve() == target:
+                                return True
+                        except OSError:
+                            pass
+    return False
+
+
+def _built_with(cand, target):
+    """Did the last build of `cand` read `target`? (from the .fls recorder file)"""
+    fls = _read(cand.with_suffix(".fls"))
+    if not fls:
         return False
-    return re.search(r"^[^%\n]*\\documentclass", text, re.M) is not None
+    rel = os.path.relpath(target, cand.parent)
+    return any(line.endswith((str(target), "/" + rel, " " + rel, "./" + rel))
+               for line in fls.splitlines() if line.startswith("INPUT "))
 
 
-def find_root(path):
+def find_root(path, _seen=None):
     """Resolve the root .tex file for `path`.
 
-    Order: "% !TEX root" (TeXShop/TextMate/VS Code convention) →
-    the file itself if it has \\documentclass → a sibling or parent .tex
-    with \\documentclass that mentions this file's name → the file itself.
+    Order: "% !TEX root" (TeXShop/TextMate/VS Code convention) → the file
+    itself if it looks like a root → a .tex file up to three folders up that
+    \\inputs/\\includes it (preferring one whose last build read it, then one
+    with the newest PDF), followed upwards → the file itself.
     """
     path = Path(path).resolve()
-    seen = set()
+    seen = _seen if _seen is not None else set()
     while path not in seen:
         seen.add(path)
         root = magic_comments(path).get("root")
         if not root:
             break
         path = (path.parent / root).resolve()
-    if path.suffix == ".bib" or not has_documentclass(path):
-        stem = path.stem
-        for d in (path.parent, path.parent.parent):
-            for cand in sorted(d.glob("*.tex")):
-                if cand == path or not has_documentclass(cand):
-                    continue
-                try:
-                    text = cand.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                if re.search(r"\\(input|include|subfile|bibliography|addbibresource)\{[^}]*"
-                             + re.escape(stem), text):
-                    return cand
-    return path
+    if path.suffix != ".bib" and is_root_like(path):
+        return path
+
+    cands = []
+    d = path.parent
+    for _ in range(4):   # this folder and up to three above
+        cands += [c.resolve() for c in sorted(d.glob("*.tex"))]
+        if d.parent == d:
+            break
+        d = d.parent
+    best, best_score = None, None
+    for c in cands:
+        if c == path or c in seen or not _includes(c, path):
+            continue
+        pdf = c.with_suffix(".pdf")
+        score = (_built_with(c, path), pdf.exists(), pdf.stat().st_mtime if pdf.exists() else 0)
+        if best_score is None or score > best_score:
+            best, best_score = c, score
+    if best is None:
+        return path
+    return best if is_root_like(best) else find_root(best, seen)
 
 
 def program_for(root):
@@ -589,7 +642,20 @@ def cmd_bibliography():
     cmd_typeset(mode="bib")
 
 
+def _results_window_in_front():
+    try:
+        return osascript('tell application "BBEdit" to get class of window 1 is in '
+                         '{results browser, search results browser}') == "true"
+    except RuntimeError:
+        return False
+
+
 def cmd_view():
+    if _results_window_in_front():
+        # BBEdit doesn't let scripts see which entry is selected in a results window.
+        notify("Double-click the entry to open it at that line, then View PDF at Cursor.",
+               title="TeX Tools: View PDF")
+        return
     path, line = front_document(save=False)
     root = find_root(path)
     pdf = root.with_suffix(".pdf")

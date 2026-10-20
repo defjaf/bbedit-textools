@@ -46,7 +46,7 @@ Either way, then, once:
 |---|---|
 | Typeset | Saves modified documents and runs `latexmk` on the root file **without blocking BBEdit**: it reruns until references settle and runs BibTeX/biber/makeindex as needed. Afterwards: a notification with error/warning counts; a results browser listing every error, warning, bad box and BibTeX/biber problem (double-click jumps to the file and line, including `\input` files and `.bib` entries); on success, Skim scrolls to the cursor position. |
 | Typeset (single pass) | One run of the engine only, like TextMate's ⌘R: the fastest feedback for text edits. New references/citations need a full Typeset (or Run BibTeX or Biber + another pass). |
-| View PDF at Cursor | SyncTeX forward search into Skim. |
+| View PDF at Cursor | SyncTeX forward search into Skim, from any file of the project. From a results window, double-click the entry first (BBEdit doesn't tell scripts which entry is selected). |
 | Show Errors & Warnings | Re-parse the existing log without compiling. |
 | Project Outline | Every `\part`…`\paragraph` and `\label` across the root file and all `\input`/`\include`/`\import` files, in document order, with numbers and pages from the `.aux` (e.g. `§ 2.1  Methods  ⟨sec:methods⟩`, `Figure 3  ⟨fig:setup⟩  p.4 — caption…`), in a window titled *Outline — file.tex* that is replaced on each run. Understands your own macros that wrap `\section` or `\label`. Click to jump. Typeset first for numbers. (BBEdit labels every entry "Note"; that can't be changed.) |
 | More Builds ▸ Typeset (force full rebuild) | `latexmk -gg`; also clears latexmk's memory of earlier failures. |
@@ -85,7 +85,7 @@ Put these at the top of any file (same convention as TeXShop, TextMate and VS Co
 % !TEX program = lualatex      % pdflatex (default) | lualatex | xelatex | latex
 ```
 
-Without a `root` line, a file lacking `\documentclass` is matched to a sibling/parent `.tex` that `\input`s or `\include`s it. Project `latexmkrc` files are respected.
+Without a `root` line, a file is its own root if it contains `\documentclass`, `\begin{document}` or `\end{document}` (so a preamble kept in an `\input` file is fine). Otherwise TeX Tools looks up to three folders up for a `.tex` file that `\input`s, `\include`s or `\import`s it, following chains of includes. If several do, it prefers the one whose last build read the file (from its `.fls`), then the one with the newest PDF. Project `latexmkrc` files are respected.
 
 ### Settings
 
